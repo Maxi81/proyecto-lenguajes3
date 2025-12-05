@@ -18,13 +18,29 @@ export async function login(formData: FormData) {
     password,
   });
 
-  // Si hay error, redirigir al login con un parámetro de error
+  // Si hay error, redirigir al login con un parámetro de error traducido
   if (error) {
-    redirect(`/auth/login?error=${encodeURIComponent(error.message)}`);
+    let translatedError = error.message;
+
+    // Traducir errores comunes de Supabase al español
+    if (error.message === "Invalid login credentials") {
+      translatedError = "Credenciales incorrectas. Verifica tu correo y contraseña.";
+    } else if (error.message === "Email not confirmed") {
+      translatedError = "Por favor, confirma tu correo antes de iniciar sesión.";
+    } else if (error.message === "User not found") {
+      translatedError = "Usuario no encontrado.";
+    } else if (error.message.toLowerCase().includes("network")) {
+      translatedError = "Error de conexión. Por favor, intenta de nuevo.";
+    } else {
+      // Mensaje genérico para otros errores
+      translatedError = "Ocurrió un error al iniciar sesión. Por favor, intenta de nuevo.";
+    }
+
+    redirect(`/auth/login?error=${encodeURIComponent(translatedError)}`);
   }
 
   if (!data.user) {
-    redirect("/auth/login?error=No user data returned");
+    redirect("/auth/login?error=No se encontraron datos del usuario. Por favor, intenta de nuevo.");
   }
 
   // Consultar inmediatamente la tabla profiles

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { formatPrice } from "@/lib/utils";
 import { useCart } from "@/components/cart-context";
 import {
@@ -9,7 +10,6 @@ import {
   getCart,
   removeFromCart,
   updateQuantity,
-  clearCart,
   checkoutCart,
 } from "@/app/carrito/actions";
 import PaypalButton from "@/components/paypal-button";
@@ -66,7 +66,7 @@ export default function CartDrawer({ onCheckout, onItemsChange }: CartDrawerProp
     if (isOpen) {
       fetchCart();
     }
-  }, [isOpen]);
+  }, [isOpen, onItemsChange]);
 
   const subtotal = useMemo(() => {
     return items.reduce((acc, item) => acc + (item.products?.price || 0) * item.quantity, 0);
@@ -74,29 +74,21 @@ export default function CartDrawer({ onCheckout, onItemsChange }: CartDrawerProp
 
   const handlePaymentSuccess = async (details?: any) => {
     try {
-      // Verificar opcionalmente que el pago fue completado
       if (details?.status && details.status !== "COMPLETED") {
         alert("El pago no fue completado. Por favor, intenta nuevamente.");
         return;
       }
 
-      // Ejecutar la acción del servidor para decrementar stock
       const result = await checkoutCart();
 
-      // Verificar si hay error en la respuesta
       if ((result as any)?.error) {
         alert(`Error: ${(result as any).error}`);
         return;
       }
 
-      // Cerrar el carrito
       closeCart();
-
-      // Mostrar mensaje de éxito
+      onCheckout?.();
       alert("¡Compra exitosa! El stock se ha actualizado.");
-
-      // Opcional: redirigir a página de agradecimiento
-      // router.push('/gracias');
     } catch (err) {
       console.error("Error al procesar la compra:", err);
       alert("Hubo un problema al procesar el stock.");
@@ -116,7 +108,6 @@ export default function CartDrawer({ onCheckout, onItemsChange }: CartDrawerProp
   const handleIncrement = (item: CartItemWithProduct) => {
     startTransition(async () => {
       setError(null);
-      // Prefer addToCart to reuse stock validation and upsert
       const res = await addToCart(item.product_id, 1);
       if ((res as any)?.error) {
         setError((res as any).error);
@@ -139,6 +130,18 @@ export default function CartDrawer({ onCheckout, onItemsChange }: CartDrawerProp
         return;
       }
       const res = await updateQuantity(item.id, item.quantity - 1);
+      if ((res as any)?.error) {
+        setError((res as any).error);
+      } else {
+        await refresh();
+      }
+    });
+  };
+
+  const handleUpdateQuantity = (item: CartItemWithProduct, quantity: number) => {
+    startTransition(async () => {
+      setError(null);
+      const res = await updateQuantity(item.id, quantity);
       if ((res as any)?.error) {
         setError((res as any).error);
       } else {
@@ -203,55 +206,15 @@ export default function CartDrawer({ onCheckout, onItemsChange }: CartDrawerProp
             </div>
           ) : (
             items.map((item) => (
-              <div
+              <CartItemRow
                 key={item.id}
-                className="flex items-center gap-3 rounded-md border border-slate-800 p-3"
-              >
-                <img
-                  src={item.products?.image_url ?? ""}
-                  alt={item.products?.title ?? "Producto"}
-                  className="h-16 w-16 rounded object-cover bg-slate-800"
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-white text-sm font-medium">
-                    {item.products?.title}
-                  </div>
-                  <div className="text-slate-300 text-sm">
-                    $ {formatPrice(item.products?.price || 0)}
-                  </div>
-                  <div className="mt-2 flex items-center gap-2">
-                    <Button
-                      variant="secondary"
-                      size="icon"
-                      onClick={() => handleDecrement(item)}
-                      disabled={isPending}
-                      aria-label="Disminuir"
-                    >
-                      −
-                    </Button>
-                    <span className="w-8 text-center text-white text-sm">
-                      {item.quantity}
-                    </span>
-                    <Button
-                      variant="secondary"
-                      size="icon"
-                      onClick={() => handleIncrement(item)}
-                      disabled={isPending}
-                      aria-label="Aumentar"
-                    >
-                      +
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleRemove(item)}
-                      disabled={isPending}
-                    >
-                      Borrar
-                    </Button>
-                  </div>
-                </div>
-              </div>
+                item={item}
+                isPending={isPending}
+                onIncrement={handleIncrement}
+                onDecrement={handleDecrement}
+                onRemove={handleRemove}
+                onUpdate={handleUpdateQuantity}
+              />
             ))
           )}
         </div>
@@ -289,3 +252,112 @@ export default function CartDrawer({ onCheckout, onItemsChange }: CartDrawerProp
     </>
   );
 }
+
+type CartItemRowProps = {
+  item: CartItemWithProduct;
+  isPending: boolean;
+  onIncrement: (item: CartItemWithProduct) => void;
+  onDecrement: (item: CartItemWithProduct) => void;
+  onRemove: (item: CartItemWithProduct) => void;
+  onUpdate: (item: CartItemWithProduct, quantity: number) => void;
+};
+
+function CartItemRow({ item, isPending, onIncrement, onDecrement, onRemove, onUpdate }: CartItemRowProps) {
+  const [localQuantity, setLocalQuantity] = useState<number | "">(item.quantity);
+
+  useEffect(() => {
+    setLocalQuantity(item.quantity);
+  }, [item.quantity]);
+
+  const sanitizeAndUpdate = () => {
+    const stock = item.products?.stock;
+
+    if (localQuantity === "" || Number(localQuantity) <= 0 || !Number.isFinite(Number(localQuantity))) {
+      setLocalQuantity(1);
+      onUpdate(item, 1);
+      return;
+    }
+
+    let next = Number(localQuantity);
+    if (typeof stock === "number" && next > stock) {
+      next = stock;
+    }
+
+    setLocalQuantity(next);
+
+    if (next === item.quantity) return;
+
+    onUpdate(item, next);
+  };
+
+  return (
+    <div className="flex items-center gap-3 rounded-md border border-slate-800 p-3">
+      <img
+        src={item.products?.image_url ?? ""}
+        alt={item.products?.title ?? "Producto"}
+        className="h-16 w-16 rounded object-cover bg-slate-800"
+      />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-white text-sm font-medium">
+          {item.products?.title}
+        </div>
+        <div className="text-slate-300 text-sm">
+          $ {formatPrice(item.products?.price || 0)}
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="icon"
+            onClick={() => onDecrement(item)}
+            disabled={isPending}
+            aria-label="Disminuir"
+          >
+            −
+          </Button>
+          <Input
+            type="number"
+            min={1}
+            max={item.products?.stock ?? undefined}
+            value={localQuantity}
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (raw === "") {
+                setLocalQuantity("");
+                return;
+              }
+              if (!/^\d+$/.test(raw)) return;
+              setLocalQuantity(Number(raw));
+            }}
+            onBlur={sanitizeAndUpdate}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                sanitizeAndUpdate();
+              }
+            }}
+            className="w-14 h-8 text-center text-white text-sm [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none appearance-none m-0"
+          />
+          <Button
+            variant="secondary"
+            size="icon"
+            onClick={() => onIncrement(item)}
+            disabled={isPending}
+            aria-label="Aumentar"
+          >
+            +
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onRemove(item)}
+            disabled={isPending}
+          >
+            Borrar
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+

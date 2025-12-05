@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import LatestProducts from "@/components/latest-products";
+import HeroCarousel from "@/components/hero-carousel";
 import { Suspense } from "react";
 
 export default async function Home() {
@@ -18,6 +19,10 @@ export default async function Home() {
                 Ver Catálogo Completo
               </Button>
             </Link>
+          </div>
+          {/* Hero Carousel */}
+          <div className="mt-12 max-w-5xl mx-auto">
+            <HeroCarousel />
           </div>
         </div>
       </section>

@@ -19,6 +19,7 @@ export default async function ProductosPage(props: {
   let query = supabase
     .from("products")
     .select("*", { count: "exact" })
+    .gt("stock", 0)
     .range(from, to);
 
   // Filtro de búsqueda por título

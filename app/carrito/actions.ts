@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { sendOrderConfirmation } from "./emails";
 
 type CartItemWithProduct = {
   id: number;
@@ -260,6 +261,41 @@ export async function checkoutCart() {
     }
   }
 
+  // Preparar datos para enviar email de confirmación
+  console.log("📧 [checkoutCart] Preparando envío de email...");
+  const { data: cartItemsWithProducts, error: itemsError } = await supabase
+    .from("cart_items")
+    .select("*, products(title, price)")
+    .eq("user_id", user.id);
+
+  console.log("📦 Items con productos obtenidos:", cartItemsWithProducts?.length || 0);
+  console.log("👤 Usuario email:", user.email);
+  console.log("✅ Tiene items?", !!cartItemsWithProducts && cartItemsWithProducts.length > 0);
+  console.log("✅ Tiene email?", !!user.email);
+
+  if (cartItemsWithProducts && cartItemsWithProducts.length > 0 && user.email) {
+    const orderItems = cartItemsWithProducts.map((item: any) => ({
+      title: item.products?.title || "Producto desconocido",
+      price: item.products?.price || 0,
+      quantity: item.quantity,
+    }));
+
+    console.log("🚀 [checkoutCart] Llamando a sendOrderConfirmation...");
+    // Enviar email asincronamente sin bloquear el checkout
+    sendOrderConfirmation(user.email, orderItems).catch((err) => {
+      console.error("💥 [checkoutCart] Error capturado en catch de sendOrderConfirmation:");
+      console.error(err);
+    });
+  } else {
+    console.warn("⚠️ [checkoutCart] NO se enviará email. Razón:");
+    if (!cartItemsWithProducts || cartItemsWithProducts.length === 0) {
+      console.warn("  - No hay items en el carrito");
+    }
+    if (!user.email) {
+      console.warn("  - Usuario no tiene email");
+    }
+  }
+
   // Eliminar todos los items del carrito después de procesar exitosamente
   const { error: deleteError } = await supabase
     .from("cart_items")
@@ -296,6 +332,17 @@ export async function checkoutSingleProduct(
     return { error: "Datos inválidos." } as const;
   }
 
+  // Obtener detalles del producto para el email
+  const { data: product, error: productError } = await supabase
+    .from("products")
+    .select("id, title, price")
+    .eq("id", productId)
+    .single();
+
+  if (productError || !product) {
+    return { error: "Producto no encontrado." } as const;
+  }
+
   // Usar RPC decrement_stock para restar stock de forma segura y atómica
   const { data: success, error: rpcError } = await supabase.rpc(
     "decrement_stock",
@@ -310,6 +357,29 @@ export async function checkoutSingleProduct(
     return {
       error: `Stock insuficiente o producto no encontrado.`,
     } as const;
+  }
+
+  // Enviar email de confirmación asincronamente
+  console.log("📧 [checkoutSingleProduct] Preparando envío de email...");
+  console.log("👤 Usuario email:", user.email);
+  console.log("📦 Producto:", product.title, "- Cantidad:", quantity);
+
+  if (user.email) {
+    const orderItems = [
+      {
+        title: product.title,
+        price: product.price,
+        quantity,
+      },
+    ];
+
+    console.log("🚀 [checkoutSingleProduct] Llamando a sendOrderConfirmation...");
+    sendOrderConfirmation(user.email, orderItems).catch((err) => {
+      console.error("💥 [checkoutSingleProduct] Error capturado en catch:");
+      console.error(err);
+    });
+  } else {
+    console.warn("⚠️ [checkoutSingleProduct] Usuario no tiene email, no se enviará confirmación");
   }
 
   // Revalidar las rutas relacionadas
